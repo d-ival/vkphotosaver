@@ -2,7 +2,6 @@ import requests
 import json
 from datetime import datetime
 import ydisk
-import os
 
 OK_CODES = [200, 201]
 
@@ -37,6 +36,14 @@ class VKPhoto:
         else:
             self.file_name = f'{self.count_of_likes}.jpg'
 
+    def get_saving_data(self):
+        max_size = self.get_max_size()
+        photo_data = {
+            'file_name': self.file_name,
+            'size': max_size['type']
+        }
+        return photo_data
+
 class VKPhotoSaver:
     CLIENT_ID = '7543688'  # идентификатор приложения
     API_VERSION = '5.120'
@@ -60,7 +67,7 @@ class VKPhotoSaver:
             # count_of_likes: count_of_photos,
         }
         for photo_data in album_data['response']['items']:
-            if len(self.photos_list) > photos_limit:
+            if len(self.photos_list) >= photos_limit:
                 break
 
             vk_photo = VKPhoto(photo_data)
@@ -72,7 +79,6 @@ class VKPhotoSaver:
         for vk_photo in self.photos_list:
             date_incl = (photos_by_likes[vk_photo.count_of_likes]>1)
             vk_photo.set_file_name(date_incl)
-            print(vk_photo.file_name)
 
     def load(self, access_token, photos_limit = 5):
 
@@ -88,16 +94,16 @@ class VKPhotoSaver:
             'owner_id': self.user_id,
             'album_id': 'profile',
             'extended': 1,
+            'rev':1,
             'v': VKPhotoSaver.API_VERSION,
             'access_token': access_token
         }
-        print('Отправка запроса на получение данных VK о фотографиях профиля...')
+        print('Получение сведений VK о фотографиях пользователя')
         response = requests.get('https://api.vk.com/method/photos.get', params=params)
 
-        print(f'Код ответа сервера: {response.status_code}')
         if not response.status_code in OK_CODES:
              result['error'] = True
-             reult['msg'] = response.headers
+             result['msg'] = response.headers
 
         self.__update_photos(json.loads(response.text), photos_limit)
         result['count'] = len(self.photos_list)
@@ -105,49 +111,56 @@ class VKPhotoSaver:
 
     def save(self, ydisk: ydisk.YDiskClient):
 
-        if len(self.photos_list) == 0:
-            print('Нет фотографий для сохранения')
+        count = len(self.photos_list)
+        if count == 0:
+            print('Нет фотографий для загрузки на Яндекс.Диск')
             return
 
-        #if not ydisk.path_exists(dir_path):
-        #   ydisk.create_dir(dir_path)
 
-        def get_saving_data(vk_photo):
+        dir_path = self.VK_DIR
+        if not ydisk.path_exists(dir_path):
+            ydisk.create_dir(dir_path)
+
+        dir_path += f'/user_id_{self.user_id}'
+        if not ydisk.path_exists(dir_path):
+            ydisk.create_dir(dir_path)
+
+        dir_path += f'/album_id_{self.album_id}'
+        if not ydisk.path_exists(dir_path):
+            ydisk.create_dir(dir_path)
+
+        print(f'Начало загрузки фотографий на Яндекс.Диск в каталог: {dir_path}')
+
+        saving_list = []
+        for vk_photo in self.photos_list:
+            print(f"Загрузка фотографии {len(saving_list)+1} из {count}")
             max_size = vk_photo.get_max_size()
-            photo_data = {
-                'file_name': vk_photo.file_name,
-                'size': max_size['type']
-            }
-            return photo_data
+            ydisk.upload_from_url(max_size['url'], path = f'{dir_path}/{vk_photo.file_name}')
+            saving_list.append(vk_photo.get_saving_data())
 
-        saving_list = list(map(get_saving_data, self.photos_list))
-        # for vk_photo in self.photos_list:
-        #     photo_data = get_saving_data(vk_photo)
-        #     saving_list.append(photo_data)
-
-        #if os.mkdir()
-        with open('tmp\\album_info.json', mode='w', encoding='utf-8') as fp:
-            json.dump(saving_list, fp)
-        #ydisk.upload_from_url()
+        data = json.dumps(saving_list, indent=4)
+        ydisk.upload(f'{dir_path}/photos.json', data=data)
 
         self.photos_list.clear()
 
 if __name__ == '__main__':
-    # with open("access_token.txt") as tokenfile:
-    #     ydisk_token = tokenfile.read().strip()
-    #
-    # vk_access_token = '958eb5d439726565e9333aa30e50e0f937ee432e927f0dbd541c541887d919a7c56f95c04217915c32008'
-    # vk_user_id = '364876557'
-    # saver = VKPhotoSaver(vk_user_id)
-    # result = saver.load(vk_access_token)
-    # if result['error']:
-    #     print(result['msg'])
-    # else:
-    #     print(f"Сохранение файлов на диск: ")
-    #     try:
-    #         saver.save(ydisk=ydisk.YDiskClient(ydisk_token))
-    #     except Exception as e:
-    #         print(e)
-    print(os.path)
+    #with open("access_token.txt") as tokenfile:
+    #    ydisk_token = tokenfile.read().strip()
+
+    vk_access_token = '958eb5d439726565e9333aa30e50e0f937ee432e927f0dbd541c541887d919a7c56f95c04217915c32008'
+
+    vk_user_id = input('Введите идентификатор пользователя VK: ')
+    ydisk_token = input('Введите токен Яндекс.Диска: ')
+
+    saver = VKPhotoSaver(vk_user_id)
+    result = saver.load(vk_access_token)
+    if result['error']:
+        print(result['msg'])
+    else:
+        try:
+            saver.save(ydisk=ydisk.YDiskClient(ydisk_token))
+        except Exception as e:
+            print(e)
+
 
 

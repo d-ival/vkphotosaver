@@ -1,8 +1,8 @@
 import requests
 import json
-import signal
 import time
 import datetime
+import os
 
 class YDiskError(Exception):
 
@@ -44,7 +44,7 @@ class YDiskOperationHandler:
         self.check_count += 1
         print(f'Проверка {self.check_count} статуса операции {self.name}: ', end='')
         response = requests.get(self.url, headers=self.ydisk.headers)
-        info = self.ydisk.check_response(response, 200)
+        info = self.ydisk.check_response(response)
         self.status = info['status']
         if self.status == 'success':
             print("операция успешно завершена")
@@ -63,10 +63,11 @@ class YDiskClient:
             "Authorization": "OAuth " + self.access_token
         }
 
-    def check_response(self, response, ok_code)->map:
+    def check_response(self, response)->map:
         info = json.loads(response.text)
 
-        if response.status_code == ok_code:
+        ok_codes = (200, 201, 202)
+        if response.status_code in ok_codes:
             return info
 
         if response.status_code == 401:
@@ -81,7 +82,7 @@ class YDiskClient:
         response = requests.get(href, params={'path': path, 'limit': 0}, headers=self.headers)
 
         try:
-            self.check_response(response, 200)
+            self.check_response(response)
         except YDiskPathNotFoundError:
             return False
         else:
@@ -90,16 +91,25 @@ class YDiskClient:
     def create_dir(self, dir_path):
         href = f'{YDiskClient.API_URL}/resources'
         response = requests.put(href, params = {'path':dir_path}, headers = self.headers)
-        self.check_response(response, 201)
+        self.check_response(response)
 
     def upload_from_url(self, url, path):
         href = f'{self.API_URL}/resources/upload'
         response = requests.post(href, params={'url':url, 'path': path}, headers=self.headers, timeout=5)
-        info = self.check_response(response, 202)
+        info = self.check_response(response)
         op = YDiskOperationHandler(self, 'upload', info)
         while op.status != 'success':
             op.check_status()
             time.sleep(1)
+
+    def upload(self, ydisk_path, data):
+
+        href = f'{self.API_URL}/resources/upload'
+        response = requests.get(href, params={'path': ydisk_path, 'overwrite': True}, headers=self.headers)
+        info = self.check_response(response)
+
+        response = requests.put(info['href'], data = data)
+        info = self.check_response(response)
 
 if __name__ == '__main__':
     with open("access_token.txt") as tokenfile:
